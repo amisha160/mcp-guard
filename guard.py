@@ -151,6 +151,18 @@ def handle_request(request):
                 "reason": "Invalid destination account",
             }
 
+        if destination == account_id:
+            audit(
+                user_id,
+                tool,
+                False,
+                "Source and destination accounts must differ",
+            )
+            return {
+                "allowed": False,
+                "reason": "Source and destination accounts must differ",
+            }
+
         if destination not in permitted:
             audit(
                 user_id,

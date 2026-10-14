@@ -41,6 +41,46 @@ APPROVER_IDS = {"admin"}
 AUDIT_LOG_PATH = os.environ.get(
     "MCP_GUARD_AUDIT_LOG", "audit.jsonl"
 )
+SECURITY_ALERTS_PATH = os.environ.get(
+    "MCP_GUARD_SECURITY_ALERTS_LOG", "security_alerts.jsonl"
+)
+
+
+def load_security_alerts(*, _log_path=None):
+    """Load valid alert objects from JSONL, skipping malformed entries."""
+    path = _log_path if _log_path is not None else SECURITY_ALERTS_PATH
+    alerts = []
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    item = json.loads(line)
+                    if isinstance(item, dict):
+                        alerts.append(item)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+    return alerts
+
+
+SECURITY_ALERTS.extend(load_security_alerts())
+
+
+def record_security_alert(entry, *, _log_path=None):
+    """Keep an alert in memory and append it to persistent JSONL storage."""
+    alert = dict(entry)
+    SECURITY_ALERTS.append(alert)
+
+    path = _log_path if _log_path is not None else SECURITY_ALERTS_PATH
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(alert) + "\n")
+    except Exception:
+        # Alert logging failures must not expose internal details.
+        pass
 
 
 def audit(user_id, tool, allowed, reason, *, _log_path=None):
@@ -54,7 +94,7 @@ def audit(user_id, tool, allowed, reason, *, _log_path=None):
     AUDIT_LOG.append(entry)
 
     if not allowed or "high-risk" in reason.lower():
-        SECURITY_ALERTS.append(dict(entry))
+        record_security_alert(entry)
 
     path = _log_path if _log_path is not None else AUDIT_LOG_PATH
     try:
@@ -190,7 +230,7 @@ def handle_request(request):
             f"Pending approval; risk={risk['level']}; score={risk['score']}",
         )
         if risk["level"] == "high":
-            SECURITY_ALERTS.append({
+            record_security_alert({
                 "time": datetime.now(timezone.utc).isoformat(),
                 "user_id": user_id,
                 "tool": tool,

@@ -139,6 +139,10 @@ def handle_request(request):
         audit("unknown", str(tool), False, "Invalid user_id")
         return {"allowed": False, "reason": "Invalid user_id"}
 
+    if not isinstance(tool, str):
+        audit(user_id, str(tool), False, "Tool not allowed")
+        return {"allowed": False, "reason": "Tool not allowed"}
+
     tool_spec = TOOL_INVENTORY.get(tool)
     if tool_spec is None:
         audit(user_id, str(tool), False, "Tool not allowed")

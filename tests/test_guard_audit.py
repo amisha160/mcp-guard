@@ -526,6 +526,20 @@ class TestUnknownToolsAndUnauthorizedAccounts:
 
 # ---------------------------------------------------------------------------
 
+class TestMalformedToolNames:
+    @pytest.mark.parametrize("tool_name", [[], {}])
+    def test_unhashable_tool_name_is_rejected_and_audited(self, tool_name):
+        result = handle_request({
+            "user_id": "riya",
+            "tool": tool_name,
+            "arguments": {},
+        })
+
+        assert result["allowed"] is False
+        assert result["reason"] == "Tool not allowed"
+        assert len(AUDIT_LOG) == 1
+        assert AUDIT_LOG[0]["allowed"] is False
+
 class TestMalformedArguments:
 
     """REQ-4: the guard must never crash or leak on any argument shape."""
@@ -985,4 +999,3 @@ class TestUnexpectedExceptionAudit:
         ]
         assert len(denied_entries) >= 1
         assert all(entry["reason"] for entry in denied_entries)
-

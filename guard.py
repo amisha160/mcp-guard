@@ -108,6 +108,10 @@ def handle_request(request):
                 "reason": "Amount must be finite",
             }
 
+        if amount > 10_000:
+            audit(user_id, tool, False, "Amount exceeds maximum transfer limit of 10000")
+            return {"allowed": False, "reason": "Amount exceeds maximum transfer limit of 10000"}
+
         if amount <= 0:
             audit(user_id, tool, False, "Amount must be positive")
             return {

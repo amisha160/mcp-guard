@@ -1,13 +1,11 @@
-
 import json
+import math
 from datetime import datetime, timezone
 
 from bank import get_balance, transfer
 
-# Demo policy: only these tools can pass through the guard.
 ALLOWED_TOOLS = {"get_balance", "transfer"}
 
-# Fictional permissions for the first demo.
 USER_ACCOUNTS = {
     "riya": {"ACC-1001", "ACC-1002"},
     "arjun": {"ACC-2001"},
@@ -17,7 +15,6 @@ AUDIT_LOG = []
 
 
 def audit(user_id, tool, allowed, reason):
-    """Record the security decision for the demo."""
     AUDIT_LOG.append({
         "time": datetime.now(timezone.utc).isoformat(),
         "user_id": user_id,
@@ -28,7 +25,6 @@ def audit(user_id, tool, allowed, reason):
 
 
 def handle_request(request):
-    """Validate a request, authorize it, and call the bank only if allowed."""
     user_id = request.get("user_id")
     tool = request.get("tool")
     args = request.get("arguments")
@@ -49,7 +45,6 @@ def handle_request(request):
         if set(args) != {"account_id"}:
             audit(user_id, tool, False, "Invalid arguments")
             return {"allowed": False, "reason": "Invalid arguments"}
-
         account_id = args["account_id"]
 
     elif tool == "transfer":
@@ -58,11 +53,15 @@ def handle_request(request):
             return {"allowed": False, "reason": "Invalid arguments"}
 
         account_id = args["from_account"]
-
         amount = args["amount"]
+
         if isinstance(amount, bool) or not isinstance(amount, (int, float)):
             audit(user_id, tool, False, "Amount must be numeric")
             return {"allowed": False, "reason": "Amount must be numeric"}
+
+        if isinstance(amount, float) and not math.isfinite(amount):
+            audit(user_id, tool, False, "Amount must be finite")
+            return {"allowed": False, "reason": "Amount must be finite"}
 
         if amount <= 0:
             audit(user_id, tool, False, "Amount must be positive")
@@ -107,12 +106,10 @@ def handle_request(request):
 
 
 if __name__ == "__main__":
-    demo = {
+    demo_request = {
         "user_id": "riya",
         "tool": "get_balance",
         "arguments": {"account_id": "ACC-1001"},
     }
-
-    print(json.dumps(handle_request(demo), indent=2))
-    print("\nAudit log:")
+    print(json.dumps(handle_request(demo_request), indent=2))
     print(json.dumps(AUDIT_LOG, indent=2))

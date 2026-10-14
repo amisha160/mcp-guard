@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 
 from bank import get_balance, transfer
+from risk import assess_risk
 
 TOOL_INVENTORY = {
     "get_balance": {
@@ -30,6 +31,7 @@ TOOL_INVENTORY = {
 }
 
 AUDIT_LOG = []
+SECURITY_ALERTS = []
 PENDING_APPROVALS = {}
 
 # Demo-only approver identity. Replace with real authentication
@@ -50,6 +52,9 @@ def audit(user_id, tool, allowed, reason, *, _log_path=None):
         "reason": reason,
     }
     AUDIT_LOG.append(entry)
+
+    if not allowed or "high-risk" in reason.lower():
+        SECURITY_ALERTS.append(dict(entry))
 
     path = _log_path if _log_path is not None else AUDIT_LOG_PATH
     try:
@@ -88,6 +93,8 @@ def handle_request(request):
     if set(args) != tool_spec["required_args"]:
         audit(user_id, tool, False, "Invalid arguments")
         return {"allowed": False, "reason": "Invalid arguments"}
+
+    risk = assess_risk(tool, args)
 
     if "amount" in tool_spec["required_args"]:
         amount = args["amount"]
@@ -161,13 +168,28 @@ def handle_request(request):
         PENDING_APPROVALS[approval_id] = {
             "user_id": user_id,
             "arguments": dict(args),
+            "risk": risk,
         }
 
-        audit(user_id, tool, True, "Pending approval")
+        audit(
+            user_id,
+            tool,
+            True,
+            f"Pending approval; risk={risk['level']}; score={risk['score']}",
+        )
+        if risk["level"] == "high":
+            SECURITY_ALERTS.append({
+                "time": datetime.now(timezone.utc).isoformat(),
+                "user_id": user_id,
+                "tool": tool,
+                "allowed": True,
+                "reason": f"High-risk request; score={risk['score']}",
+            })
         return {
             "allowed": True,
             "status": "pending_approval",
             "approval_id": approval_id,
+            "risk": risk,
             "message": "Transfer queued; no money moved yet.",
         }
 
@@ -180,8 +202,13 @@ def handle_request(request):
         audit(user_id, tool, False, "Internal error")
         return {"allowed": False, "reason": "Internal error"}
 
-    audit(user_id, tool, True, "Policy checks passed")
-    return {"allowed": True, "result": result}
+    audit(
+        user_id,
+        tool,
+        True,
+        f"Policy checks passed; risk={risk['level']}; score={risk['score']}",
+    )
+    return {"allowed": True, "result": result, "risk": risk}
 
 
 def approve_transfer(approver_id, approval_id):

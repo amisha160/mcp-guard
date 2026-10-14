@@ -1,172 +1,63 @@
-\# MCP Guard
+﻿# MCP Guard — Secure MCP Banking Demo
 
+A Python project demonstrating how to protect banking tools exposed through the Model Context Protocol (MCP).
 
+## Features
 
-MCP Guard is a Python-based security layer for controlling access to banking tools. It validates tool requests, checks account permissions, applies transfer limits, and queues high-risk transfers for approval.
+- MCP server using FastMCP over stdio
+- Guarded account balance queries
+- Authorization checks for account access
+- Risk scoring and transfer limits
+- Transfer approval workflow
+- Audit and security monitoring
+- Automated security and integration tests
 
+## Architecture
 
+MCP client → MCP server → Guard authorization and risk checks → Mock banking layer
 
-\## Features
+Transfers are queued for approval before execution. This project uses fictional accounts and simulated banking operations. It is a demonstration, not production banking software.
 
+## Requirements
 
+- Python 3.10+
+- MCP Python SDK compatible with the installed server code
+- pytest
 
-\- \*\*Tool allowlisting:\*\* Only registered tools can be called.
+## Setup
 
-\- \*\*Argument validation:\*\* Rejects missing, unexpected, or incorrectly typed arguments.
+Install dependencies:
 
-\- \*\*Account authorization:\*\* Checks whether a user is permitted to access the requested account.
-
-\- \*\*Transfer limits:\*\* Rejects invalid, non-finite, non-positive, or over-limit transfer amounts.
-
-\- \*\*Transfer approval:\*\* Queues transfers for approval before executing them.
-
-\- \*\*Approval controls:\*\* Supports approving or rejecting pending transfers and prevents reuse of consumed approval IDs.
-
-\- \*\*Audit logging:\*\* Records security decisions in an in-memory log and attempts to append them to a JSON Lines file.
-
-\- \*\*Automated tests:\*\* Uses pytest to verify security rules and transfer behavior.
-
-
-
-\## Project Structure
-
-
-
-```text
-
-mcp-guard/
-
-├── bank.py
-
-├── guard.py
-
-└── tests/
-
+```bash
+python -m pip install "mcp<2" pytest
 ```
 
+Run the MCP server:
 
-
-Additional files may be present depending on the project version.
-
-
-
-\## Requirements
-
-
-
-\- Python 3
-
-\- pytest to run the test suite
-
-
-
-Install pytest if needed:
-
-
-
-```powershell
-
-python -m pip install pytest
-
+```bash
+python bank_mcp_server.py
 ```
 
+Run the MCP client integration test in another terminal:
 
-
-\## Run the Demo
-
-
-
-From the project directory, run:
-
-
-
-```powershell
-
-python guard.py
-
+```bash
+python test_mcp_client.py
 ```
 
+Run the test suite:
 
-
-The script demonstrates a balance request and prints the resulting audit log.
-
-
-
-\## Run the Tests
-
-
-
-Run the complete test suite with:
-
-
-
-```powershell
-
-python -m pytest tests/ -v
-
+```bash
+python -m pytest -q
 ```
 
+## Security notes
 
+- Access is checked before protected operations.
+- Transfers require approval.
+- Approval IDs cannot be reused to execute the same transfer twice.
+- Caller-supplied user IDs are not independently authenticated in this demo.
+- Do not connect this demo to real banking accounts or production systems.
 
-The tests cover request validation, authorization, prompt-injection-style inputs, transfer approval, and security edge cases.
+## Repository
 
-
-
-\## Transfer Approval Workflow
-
-
-
-1\. A user submits a transfer request.
-
-2\. MCP Guard validates the tool, arguments, amount, and account permissions.
-
-3\. A valid high-risk transfer is placed in the pending approval queue. No money moves at this stage.
-
-4\. An authorized approver approves or rejects the request.
-
-5\. An approved transfer is executed, while a rejected transfer does not move money.
-
-6\. The decision is recorded in the audit log.
-
-
-
-\## Security Limitations
-
-
-
-This project is a prototype and is not production-ready.
-
-
-
-\- Approver identity is represented by a hardcoded demo allowlist.
-
-\- Pending approvals and the in-memory audit list do not survive process restarts.
-
-\- Audit file write failures are suppressed, so a successful security decision does not guarantee that the record was persisted.
-
-\- Production deployments would need trusted authentication, stronger authorization, durable and protected audit storage, and appropriate concurrency controls.
-
-
-
-\## Future Improvements
-
-
-
-\- Integrate a trusted authentication and authorization provider.
-
-\- Persist pending approvals securely.
-
-\- Improve audit-log durability and monitoring.
-
-\- Add concurrency and failure-recovery tests.
-
-\- Configure continuous integration to run tests automatically on pull requests.
-
-
-
-\## Disclaimer
-
-
-
-MCP Guard is an educational security prototype. Do not use it to protect real banking transactions without substantial additional security engineering and independent review.
-
+https://github.com/amisha160/mcp-guard

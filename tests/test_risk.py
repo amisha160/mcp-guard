@@ -66,3 +66,19 @@ def test_same_source_and_destination_increases_risk():
 
     assert result["level"] == "high"
     assert "same_source_and_destination" in result["reasons"]
+
+
+def test_extremely_large_integer_amount_is_high_risk():
+    result = assess_risk(
+        "transfer",
+        {
+            "from_account": "ACC-1001",
+            "to_account": "ACC-1002",
+            "amount": 10**10000,
+        },
+    )
+
+    assert result["level"] == "high"
+    assert result["score"] == 100
+    assert "amount_out_of_policy" in result["reasons"]
+

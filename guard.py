@@ -46,6 +46,27 @@ SECURITY_ALERTS_PATH = os.environ.get(
 )
 
 
+def load_audit_log(*, _log_path=None):
+    """Load valid audit objects from JSONL, skipping malformed entries."""
+    path = _log_path if _log_path is not None else AUDIT_LOG_PATH
+    entries = []
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    item = json.loads(line)
+                    if isinstance(item, dict):
+                        entries.append(item)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+    except OSError:
+        pass
+    return entries
+
+
+AUDIT_LOG.extend(load_audit_log())
+
+
 def load_security_alerts(*, _log_path=None):
     """Load valid alert objects from JSONL, skipping malformed entries."""
     path = _log_path if _log_path is not None else SECURITY_ALERTS_PATH

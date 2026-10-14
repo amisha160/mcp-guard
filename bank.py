@@ -1,4 +1,4 @@
-
+import math
 # Fictional data only. Never use real banking or personal information.
 
 ACCOUNTS = {
@@ -19,7 +19,6 @@ def get_balance(account_id):
         "currency": "INR",
     }
 
-
 def transfer(from_account, to_account, amount):
     """Transfer fictional funds between two existing demo accounts."""
     if from_account not in ACCOUNTS or to_account not in ACCOUNTS:
@@ -30,6 +29,9 @@ def transfer(from_account, to_account, amount):
 
     if isinstance(amount, bool) or not isinstance(amount, (int, float)):
         raise ValueError("Amount must be numeric")
+
+    if isinstance(amount, float) and not math.isfinite(amount):
+        raise ValueError("Amount must be finite")
 
     if amount <= 0:
         raise ValueError("Amount must be positive")
@@ -47,8 +49,6 @@ def transfer(from_account, to_account, amount):
         "amount": amount,
         "currency": "INR",
     }
-
-
 if __name__ == "__main__":
     print("Initial balance:")
     print(get_balance("ACC-1001"))

@@ -173,7 +173,7 @@ def handle_request(request):
                 "reason": "Amount must be numeric",
             }
 
-        if not math.isfinite(amount):
+        if isinstance(amount, float) and not math.isfinite(amount):
             audit(user_id, tool, False, "Amount must be finite")
             return {
                 "allowed": False,

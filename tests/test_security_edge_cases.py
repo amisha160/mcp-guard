@@ -121,3 +121,10 @@ def test_unauthorized_destination_does_not_create_approval():
     assert result["allowed"] is False
     assert guard.PENDING_APPROVALS == {}
     assert guard.AUDIT_LOG[-1]["allowed"] is False
+
+def test_extremely_large_integer_amount_is_rejected_without_crashing():
+    result = guard.handle_request(make_transfer(amount=10**10000))
+
+    assert result["allowed"] is False
+    assert "approval_id" not in result
+    assert guard.PENDING_APPROVALS == {}

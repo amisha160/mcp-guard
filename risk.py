@@ -32,7 +32,7 @@ def assess_risk(tool, arguments):
         if isinstance(amount, bool) or not isinstance(amount, (int, float)):
             score += 60
             reasons.append("invalid_amount")
-        elif not isfinite(amount) or amount <= 0 or amount > 10_000:
+        elif amount <= 0 or amount > 10_000 or not isfinite(amount):
             score += 60
             reasons.append("amount_out_of_policy")
 

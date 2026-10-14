@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import subprocess
 import sys
@@ -61,3 +61,23 @@ def test_audit_write_failure_does_not_crash_or_change_authorization(tmp_path):
 
     assert len(AUDIT_LOG) == before + 1
     assert AUDIT_LOG[-1]["allowed"] is True
+
+def test_handle_request_authorization_is_unchanged_when_audit_write_fails(
+    tmp_path, monkeypatch
+):
+    import guard
+
+    impossible_path = tmp_path / "missing-directory" / "audit.jsonl"
+    monkeypatch.setattr(guard, "AUDIT_LOG_PATH", str(impossible_path))
+
+    request = {
+        "user_id": "riya",
+        "tool": "get_balance",
+        "arguments": {"account_id": "ACC-1001"},
+    }
+
+    result = guard.handle_request(request)
+
+    # A logging failure must not turn an authorized request into a denial.
+    assert result["allowed"] is True
+

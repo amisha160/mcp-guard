@@ -1,28 +1,19 @@
+
 import json
 import math
 import os
+import uuid
 from datetime import datetime, timezone
 
 from bank import get_balance, transfer
 
-# ---------------------------------------------------------------------------
-# Explicit tool inventory.
-# Each entry defines what the tool is, its risk level, which argument keys it
-# accepts (exact set), which argument names carry account IDs for authorization,
-# and which callers may use it.
-#
-# This is the single source of truth for policy enforcement.  Adding a new tool
-# means adding one entry here; no changes to handle_request are required.
-# ---------------------------------------------------------------------------
 TOOL_INVENTORY = {
     "get_balance": {
         "risk_level": "low",
         "required_args": {"account_id"},
-        # The argument that holds the caller's source account ID.
         "account_arg": "account_id",
-        # user_id -> set of account IDs the user may access with this tool.
         "permitted_callers": {
-            "riya":  {"ACC-1001", "ACC-1002"},
+            "riya": {"ACC-1001", "ACC-1002"},
             "arjun": {"ACC-2001"},
         },
     },
@@ -30,31 +21,27 @@ TOOL_INVENTORY = {
         "risk_level": "high",
         "required_args": {"from_account", "to_account", "amount"},
         "account_arg": "from_account",
-        # When present, the destination account is also checked against the
-        # caller's permitted set.
         "destination_arg": "to_account",
         "permitted_callers": {
-            "riya":  {"ACC-1001", "ACC-1002"},
+            "riya": {"ACC-1001", "ACC-1002"},
             "arjun": {"ACC-2001"},
         },
     },
 }
 
 AUDIT_LOG = []
+PENDING_APPROVALS = {}
 
-# Default path for the persistent JSONL audit log.
-# Each line is one JSON object.  Set AUDIT_LOG_PATH before importing (or
-# monkey-patch it in tests) to redirect the file.  Pass _log_path to audit()
-# directly when you need per-call control (e.g. pytest tmp_path).
-AUDIT_LOG_PATH = os.environ.get("MCP_GUARD_AUDIT_LOG", "audit.jsonl")
+# Demo-only approver identity. Replace with real authentication
+# and authorization before using outside the hackathon prototype.
+APPROVER_IDS = {"admin"}
+
+AUDIT_LOG_PATH = os.environ.get(
+    "MCP_GUARD_AUDIT_LOG", "audit.jsonl"
+)
 
 
 def audit(user_id, tool, allowed, reason, *, _log_path=None):
-    """Append one entry to the in-memory log and to the JSONL file.
-
-    File-write failures are silenced so that a disk error never prevents a
-    correctly-denied request from returning its blocked response.
-    """
     entry = {
         "time": datetime.now(timezone.utc).isoformat(),
         "user_id": user_id,
@@ -68,12 +55,16 @@ def audit(user_id, tool, allowed, reason, *, _log_path=None):
     try:
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry) + "\n")
-    except Exception:  # noqa: BLE001
-        # Never let a logging failure surface to the caller.
+    except Exception:
+        # Logging failures must not expose internal details.
         pass
 
 
 def handle_request(request):
+    if not isinstance(request, dict):
+        audit("unknown", "unknown", False, "Invalid request")
+        return {"allowed": False, "reason": "Invalid request"}
+
     user_id = request.get("user_id")
     tool = request.get("tool")
     args = request.get("arguments")
@@ -89,29 +80,41 @@ def handle_request(request):
 
     if not isinstance(args, dict):
         audit(user_id, tool, False, "Arguments must be an object")
-        return {"allowed": False, "reason": "Arguments must be an object"}
+        return {
+            "allowed": False,
+            "reason": "Arguments must be an object",
+        }
 
     if set(args) != tool_spec["required_args"]:
         audit(user_id, tool, False, "Invalid arguments")
         return {"allowed": False, "reason": "Invalid arguments"}
 
-    # Amount validation applies to any tool that accepts an "amount" argument.
     if "amount" in tool_spec["required_args"]:
         amount = args["amount"]
 
-        if isinstance(amount, bool) or not isinstance(amount, (int, float)):
+        if isinstance(amount, bool) or not isinstance(
+            amount, (int, float)
+        ):
             audit(user_id, tool, False, "Amount must be numeric")
-            return {"allowed": False, "reason": "Amount must be numeric"}
+            return {
+                "allowed": False,
+                "reason": "Amount must be numeric",
+            }
 
-        if isinstance(amount, float) and not math.isfinite(amount):
+        if not math.isfinite(amount):
             audit(user_id, tool, False, "Amount must be finite")
-            return {"allowed": False, "reason": "Amount must be finite"}
+            return {
+                "allowed": False,
+                "reason": "Amount must be finite",
+            }
 
         if amount <= 0:
             audit(user_id, tool, False, "Amount must be positive")
-            return {"allowed": False, "reason": "Amount must be positive"}
+            return {
+                "allowed": False,
+                "reason": "Amount must be positive",
+            }
 
-    # Source account authorization.
     account_id = args[tool_spec["account_arg"]]
 
     if not isinstance(account_id, str):
@@ -122,42 +125,115 @@ def handle_request(request):
 
     if account_id not in permitted:
         audit(user_id, tool, False, "User not authorized for account")
-        return {"allowed": False, "reason": "User not authorized for account"}
+        return {
+            "allowed": False,
+            "reason": "User not authorized for account",
+        }
 
-    # Destination account authorization (tools that declare a destination_arg).
     if "destination_arg" in tool_spec:
         destination = args[tool_spec["destination_arg"]]
+
         if not isinstance(destination, str):
             audit(user_id, tool, False, "Invalid destination account")
-            return {"allowed": False, "reason": "Invalid destination account"}
+            return {
+                "allowed": False,
+                "reason": "Invalid destination account",
+            }
 
         if destination not in permitted:
-            audit(user_id, tool, False, "User not authorized for destination")
+            audit(
+                user_id,
+                tool,
+                False,
+                "User not authorized for destination",
+            )
             return {
                 "allowed": False,
                 "reason": "User not authorized for destination",
             }
 
+        # High-risk transfers are queued and do not move money here.
+        approval_id = str(uuid.uuid4())
+        PENDING_APPROVALS[approval_id] = {
+            "user_id": user_id,
+            "arguments": dict(args),
+        }
+
+        audit(user_id, tool, True, "Pending approval")
+        return {
+            "allowed": True,
+            "status": "pending_approval",
+            "approval_id": approval_id,
+            "message": "Transfer queued; no money moved yet.",
+        }
+
     try:
-        if tool == "get_balance":
-            result = get_balance(account_id)
-        else:
-            result = transfer(
-                args["from_account"],
-                args["to_account"],
-                args["amount"],
-            )
+        result = get_balance(account_id)
     except (KeyError, ValueError) as exc:
         audit(user_id, tool, False, str(exc))
         return {"allowed": False, "reason": str(exc)}
     except Exception:
-        # Unexpected exception from a bank function.  Audit with a fixed
-        # reason so no internal detail leaks to the caller.
         audit(user_id, tool, False, "Internal error")
         return {"allowed": False, "reason": "Internal error"}
 
     audit(user_id, tool, True, "Policy checks passed")
     return {"allowed": True, "result": result}
+
+
+def approve_transfer(approver_id, approval_id):
+    if approver_id not in APPROVER_IDS:
+        audit(str(approver_id), "transfer", False, "Approver not authorized")
+        return {"allowed": False, "reason": "Approver not authorized"}
+
+    if not isinstance(approval_id, str):
+        audit(approver_id, "transfer", False, "Invalid approval ID")
+        return {"allowed": False, "reason": "Invalid approval ID"}
+
+    pending = PENDING_APPROVALS.pop(approval_id, None)
+    if pending is None:
+        audit(approver_id, "transfer", False, "Approval not found")
+        return {"allowed": False, "reason": "Approval not found"}
+
+    args = pending["arguments"]
+    requester = pending["user_id"]
+
+    try:
+        result = transfer(
+            args["from_account"],
+            args["to_account"],
+            args["amount"],
+        )
+    except (KeyError, ValueError) as exc:
+        audit(requester, "transfer", False, str(exc))
+        audit(approver_id, "approve_transfer", False, "Transfer failed")
+        return {"allowed": False, "reason": str(exc)}
+    except Exception:
+        audit(requester, "transfer", False, "Internal error")
+        audit(approver_id, "approve_transfer", False, "Transfer failed")
+        return {"allowed": False, "reason": "Internal error"}
+
+    audit(requester, "transfer", True, "Transfer approved and executed")
+    audit(approver_id, "approve_transfer", True, "Approval completed")
+    return {"allowed": True, "result": result}
+
+
+def reject_transfer(approver_id, approval_id):
+    if approver_id not in APPROVER_IDS:
+        audit(str(approver_id), "transfer", False, "Approver not authorized")
+        return {"allowed": False, "reason": "Approver not authorized"}
+
+    if not isinstance(approval_id, str):
+        audit(approver_id, "transfer", False, "Invalid approval ID")
+        return {"allowed": False, "reason": "Invalid approval ID"}
+
+    pending = PENDING_APPROVALS.pop(approval_id, None)
+    if pending is None:
+        audit(approver_id, "transfer", False, "Approval not found")
+        return {"allowed": False, "reason": "Approval not found"}
+
+    audit(pending["user_id"], "transfer", False, "Transfer rejected")
+    audit(approver_id, "reject_transfer", True, "Rejection completed")
+    return {"allowed": True, "status": "rejected"}
 
 
 if __name__ == "__main__":
@@ -167,14 +243,6 @@ if __name__ == "__main__":
         "arguments": {"account_id": "ACC-1001"},
     }
     print(json.dumps(handle_request(demo_request), indent=2))
-
-    blocked_request = {
-        "user_id": "riya",
-        "tool": "get_balance",
-        "arguments": {"account_id": "ACC-2001"},
-    }
-    print("\nBlocked request:")
-    print(json.dumps(handle_request(blocked_request), indent=2))
 
     print("\nAudit log:")
     print(json.dumps(AUDIT_LOG, indent=2))

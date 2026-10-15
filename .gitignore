@@ -4,3 +4,8 @@ __pycache__/
 .venv/
 venv/
 audit.jsonl
+
+# Generated audit and backup files
+/audit_integrity.jsonl
+*.backup
+

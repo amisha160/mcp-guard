@@ -1,4 +1,4 @@
-﻿"""
+"""
 
 tests/test_guard_audit.py
 
@@ -44,7 +44,7 @@ from unittest.mock import patch
 
 from bank import ACCOUNTS
 
-from guard import AUDIT_LOG, handle_request
+from guard import AUDIT_LOG, approve_transfer, handle_request
 
 # ---------------------------------------------------------------------------
 
@@ -216,11 +216,15 @@ class TestAllowedCallsAreAudited:
 
         assert math.isclose(result["result"]["balance"], 25000.0)
 
-    def test_allowed_transfer_returns_simulated_status(self):
+    def test_allowed_transfer_returns_pending_approval_status(self):
 
         result = handle_request(_make_transfer_request())
 
-        assert result["result"]["status"] == "simulated"
+        assert result["allowed"] is True
+
+        assert result["status"] == "pending_approval"
+
+        assert "approval_id" in result
 
     def test_each_allowed_call_appends_exactly_one_entry(self):
 
@@ -654,15 +658,15 @@ class TestMalformedArguments:
 
         assert result["allowed"] is False
 
-    def test_non_dict_request_raises_gracefully(self):
+    def test_non_dict_request_is_rejected_safely(self):
+        """A non-dictionary request is denied without raising an exception."""
+        result = handle_request("not a dict")
 
-        # handle_request uses .get() on the request, so non-dict input will
-
-        # raise AttributeError.  We assert the guard does not silently succeed.
-
-        with pytest.raises((AttributeError, TypeError)):
-
-            handle_request("not a dict")
+        assert result["allowed"] is False
+        assert len(AUDIT_LOG) == 1
+        assert AUDIT_LOG[0]["allowed"] is False
+        assert isinstance(AUDIT_LOG[0]["reason"], str)
+        assert AUDIT_LOG[0]["reason"]
 
     def test_each_malformed_call_produces_one_audit_entry(self):
 
@@ -786,31 +790,22 @@ class TestRejectedTransfersLeaveBalancesUnchanged:
 
         before = self._snapshot()
 
-        handle_request(_make_transfer_request(amount=100))
+        pending = handle_request(_make_transfer_request(amount=100))
 
-        # The valid request above should succeed; check correct direction.
+        assert pending["allowed"] is True
 
-        # Now try an invalid one:
+        assert pending["status"] == "pending_approval"
 
-        handle_request({"user_id": None, "tool": "transfer",
+        denied = handle_request({"user_id": None, "tool": "transfer",
+                                 "arguments": {"from_account": "ACC-1001",
+                                               "to_account": "ACC-1002",
+                                               "amount": 100}})
 
-                        "arguments": {"from_account": "ACC-1001",
-
-                                      "to_account": "ACC-1002",
-
-                                      "amount": 100}})
-
-        # Only the first request should have changed balances.
-
-        # (The reset_accounts fixture restores them after each test, so
-
-        #  this just checks the second call did not apply a second mutation.)
+        assert denied["allowed"] is False
 
         after = self._snapshot()
 
-        # ACC-1001 must be 25000 - 100 (from the first call) and nothing more.
-
-        assert math.isclose(after["ACC-1001"], 25000.0 - 100)
+        self._assert_balances_unchanged(before, after)
 
     def test_insufficient_funds_transfer_leaves_balances_unchanged(self):
 
@@ -978,14 +973,16 @@ class TestUnexpectedExceptionAudit:
 
     def test_unexpected_transfer_exception_is_audited(self):
 
-        req = _make_transfer_request()
+        pending = handle_request(_make_transfer_request())
+
+        assert pending["status"] == "pending_approval"
 
         with patch("guard.transfer", side_effect=TypeError("unexpected type")):
 
-            result = handle_request(req)
+            result = approve_transfer("admin", pending["approval_id"])
 
         assert result["allowed"] is False
 
-        assert len(AUDIT_LOG) == 1
+        assert len(AUDIT_LOG) == 3
 
-        assert AUDIT_LOG[0]["allowed"] is False
+        assert all(entry["allowed"] is False for entry in AUDIT_LOG[1:])
